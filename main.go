@@ -1,12 +1,9 @@
 package main
 
 import (
-	//	"bitbucket.org/kardianos/osext"
 	"fmt"
-	"log"
-	//	"github.com/mattn/go-gtk/gdkpixbuf"
-	//	"github.com/mattn/go-gtk/glib"
 	"github.com/mattn/go-gtk/gtk"
+	"log"
 	"net"
 	"os"
 	"path"
@@ -16,19 +13,22 @@ import (
 )
 
 const (
-	height int = 3
-	width  int = 3
+	PORT   int = 6392
+	HEIGHT int = 3
+	WIDTH  int = 3
 )
 
 var window *gtk.Window
+var label *gtk.Label
 var button [][]*gtk.Button
 var state [][]int
-var address map[string]interface{}
-var isMyTurn bool
+var address map[string]int
+var addressList *gtk.ComboBoxText
 var blank, nought, cross *os.File
 var startButton *gtk.Button
-var addressList *gtk.ComboBoxText
 var opponent string
+var isMyTurn bool
+var localAddr net.Addr
 
 func main() {
 	opponent = ""
@@ -36,23 +36,26 @@ func main() {
 	blank = readResource("blank.png")
 	nought = readResource("nought.png")
 	cross = readResource("cross.png")
-	log.Println(cross.Name())
 
 	gtk.Init(nil)
 	window = gtk.NewWindow(gtk.WINDOW_TOPLEVEL)
-	window.SetTitle("GTK Icon View")
+	window.SetTitle("GTK Noughts & Crosses")
 	window.Connect("destroy", gtk.MainQuit)
 
-	address = make(map[string]interface{})
+	label = gtk.NewLabel("Select an opponent")
+	label.ModifyFontEasy("DejaVu Serif 20")
 
+	address = make(map[string]int)
+
+	// Buttons for game
 	alignment := gtk.NewAlignment(1, 1, 1, 1)
 	table := gtk.NewTable(3, 3, false)
-	button = make([][]*gtk.Button, height, height)
-	state = make([][]int, height, height)
-	for i := 0; i < height; i++ {
-		button[i] = make([]*gtk.Button, width, width)
-		state[i] = make([]int, width, width)
-		for j := 0; j < width; j++ {
+	button = make([][]*gtk.Button, HEIGHT, HEIGHT)
+	state = make([][]int, HEIGHT, HEIGHT)
+	for i := 0; i < HEIGHT; i++ {
+		button[i] = make([]*gtk.Button, WIDTH, WIDTH)
+		state[i] = make([]int, WIDTH, WIDTH)
+		for j := 0; j < WIDTH; j++ {
 			button[i][j] = gtk.NewButton()
 			image := gtk.NewImageFromFile(blank.Name())
 			button[i][j].SetImage(image)
@@ -68,7 +71,9 @@ func main() {
 					button[copiedI][copiedJ].SetImage(image)
 					message := "done " + strconv.Itoa(copiedI) + " " + strconv.Itoa(copiedJ) + " "
 					sendMessage(opponent, message)
-					judge()
+					if finished := judge(); finished == false {
+						label.SetLabel("Opponent's turn")
+					}
 					isMyTurn = false
 				}
 			})
@@ -82,40 +87,51 @@ func main() {
 	startButton.Connect("clicked", func() {
 		if addressList.GetActiveText() != "" {
 			sendMessage(addressList.GetActiveText(), "start ")
-			startButton.SetState(gtk.STATE_INSENSITIVE)
+			startButton.SetSensitive(false)
+			addressList.SetSensitive(false)
+			for i := 0; i < HEIGHT; i++ {
+				for j := 0; j < WIDTH; j++ {
+					image := gtk.NewImageFromFile(blank.Name())
+					button[i][j].SetImage(image)
+					state[i][j] = 0
+				}
+			}
 		}
 
 	})
-	go listenUsers(addressList)
+	go listen(addressList)
 	go broadcast()
 
 	fixed := gtk.NewFixed()
 
 	alignment.Add(table)
-	fixed.Put(alignment, 0, 0)
-	fixed.Put(addressList, 0, 330)
-	fixed.Put(startButton, 200, 330)
+	fixed.Put(label, 0, 10)
+	fixed.Put(alignment, 0, 40)
+	fixed.Put(addressList, 0, 370)
+	fixed.Put(startButton, 120, 370)
 
 	window.Add(fixed)
 
-	window.SetSizeRequest(400, 400)
+	window.SetSizeRequest(330, 400)
 	window.ShowAll()
 
 	gtk.Main()
 }
 
 func sendMessage(remoteAddr, message string) {
-	serverAddr, err := net.ResolveUDPAddr("udp", remoteAddr+":6392")
+	serverAddr, err := net.ResolveUDPAddr("udp", remoteAddr+":"+strconv.Itoa(PORT))
 	conn, err := net.DialUDP("udp", nil, serverAddr)
 	if err != nil {
 		log.Panic("Unicast cannot be sent")
 	}
-	log.Println("Send: " + message)
+	log.Println("Message sent to " + conn.RemoteAddr().String() + ": " + message)
 	fmt.Fprintf(conn, message)
 }
 
-func judge() {
-	msg := []string{"", "You've won.", "You've lost."}
+func judge() bool {
+	msg := []string{"Draw!", "You've won!", "You've lost!"}
+	msgNum := -1
+	// Check whether each wins
 	for n := 1; n <= 2; n++ {
 		if (state[0][0] == n && state[1][0] == n && state[2][0] == n) ||
 			(state[0][1] == n && state[1][1] == n && state[2][1] == n) ||
@@ -125,105 +141,124 @@ func judge() {
 			(state[2][0] == n && state[2][1] == n && state[2][2] == n) ||
 			(state[0][0] == n && state[1][1] == n && state[2][2] == n) ||
 			(state[2][0] == n && state[1][1] == n && state[0][2] == n) {
-			log.Println("aaa")
-			log.Println(msg[n])
-			dialog := gtk.NewMessageDialog(window, gtk.DIALOG_MODAL, gtk.MESSAGE_INFO, gtk.BUTTONS_OK, msg[n])
-			log.Println("bbb")
-			dialog.SetTitle("Game Over")
-			dialog.Response(func() {
-				dialog.Destroy()
-			})
-			log.Println("ccc")
-			dialog.Run()
-			log.Println("ddd")
-			for i := 0; i < height; i++ {
-				for j := 0; j < width; j++ {
-					image := gtk.NewImageFromFile(blank.Name())
-					button[i][j].SetImage(image)
-					state[i][j] = 0
-				}
-			}
-			opponent = ""
-			startButton.SetState(gtk.STATE_NORMAL)
-			isMyTurn = false
-			break
+			msgNum = n
 		}
 	}
+	// Check whether blank cells exist
+	blankCell := 0
+	for i := 0; i < HEIGHT; i++ {
+		for j := 0; j < WIDTH; j++ {
+			if state[i][j] == 0 {
+				blankCell++
+			}
+		}
+	}
+	if blankCell == 0 {
+		msgNum = 0
+	}
+	// Finish game if the above conditions are matched
+	if msgNum != -1 {
+		label.SetLabel(msg[msgNum])
+		opponent = ""
+		startButton.SetSensitive(true)
+		addressList.SetSensitive(true)
+		isMyTurn = false
+		return true
+	}
+	return false
 }
 
-func listenUsers(addressList *gtk.ComboBoxText) {
-	serverAddr, err := net.ResolveUDPAddr("udp", ":6392")
+func listen(addressList *gtk.ComboBoxText) {
+	serverAddr, err := net.ResolveUDPAddr("udp", ":"+strconv.Itoa(PORT))
 	l, err := net.ListenUDP("udp", serverAddr)
 	if err != nil {
 		log.Fatal(err)
 	}
 	defer l.Close()
+	log.Println("Broadcast listening: PORT=" + strconv.Itoa(PORT))
 
 	for {
 		// Wait for a connection.
-		//log.Println("Broadcast listening")
 		data := make([]byte, 4096)
 		_, remoteAddr, err := l.ReadFromUDP(data)
 		if err != nil {
-
+			log.Panic("Error while reading message: " + err.Error())
 		}
-		//localAddr := l.LocalAddr()
 		message := strings.Split(string(data), " ")
 		switch message[0] {
 		case "broadcast":
+			if remoteAddr.String() == localAddr.String() {
+				break
+			}
 			addressAry := strings.Split(remoteAddr.String(), ":")
 			if _, ok := address[addressAry[0]]; ok == false {
-				address[addressAry[0]] = nil
+				address[addressAry[0]] = len(address)
 				addressList.AppendText(addressAry[0])
 				log.Println("Broadcast accept: " + remoteAddr.String())
 			}
 		case "start":
+			log.Println("Message received from " + remoteAddr.String() + ": " + string(data))
 			addressAry := strings.Split(remoteAddr.String(), ":")
 			if opponent == "" {
 				opponent = addressAry[0]
+				if _, ok := address[opponent]; ok == false {
+					address[opponent] = len(address)
+					addressList.AppendText(opponent)
+				}
+				addressList.SetActive(address[opponent])
 				sendMessage(opponent, "accept ")
-				startButton.SetState(gtk.STATE_INSENSITIVE)
+				startButton.SetSensitive(false)
+				addressList.SetSensitive(false)
 				isMyTurn = true
+				for i := 0; i < HEIGHT; i++ {
+					for j := 0; j < WIDTH; j++ {
+						image := gtk.NewImageFromFile(blank.Name())
+						button[i][j].SetImage(image)
+						state[i][j] = 0
+					}
+				}
+				label.SetLabel("Challenged: Your turn")
 			} else {
 				sendMessage(addressAry[0], "deny ")
 			}
 		case "accept":
+			log.Println("Message received from " + remoteAddr.String() + ": " + string(data))
 			addressAry := strings.Split(remoteAddr.String(), ":")
 			opponent = addressAry[0]
+			label.SetLabel("Opponent's turn")
 		case "deny":
-			dialog := gtk.NewMessageDialog(window, gtk.DIALOG_MODAL, gtk.MESSAGE_INFO, gtk.BUTTONS_OK, "Opponent Busy")
-			dialog.SetTitle("Opponent Busy")
-			dialog.Response(func() {
-				dialog.Destroy()
-			})
-			dialog.Run()
-			startButton.SetState(gtk.STATE_NORMAL)
+			log.Println("Message received from " + remoteAddr.String() + ": " + string(data))
+			label.SetLabel("Opponent busy")
+			startButton.SetSensitive(true)
+			addressList.SetSensitive(true)
 		case "done":
-			fmt.Println(message[0])
-			fmt.Println(message[1])
-			fmt.Println(message[2])
-			i, _ := strconv.Atoi(message[1])
-			j, _ := strconv.Atoi(message[2])
-			fmt.Println(i)
-			fmt.Println(j)
+			log.Println("Message received from " + remoteAddr.String() + ": " + string(data))
+			i, err := strconv.Atoi(message[1])
+			if err != nil {
+				log.Panic("Message cannot be retrieved: " + err.Error())
+			}
+			j, err := strconv.Atoi(message[2])
+			if err != nil {
+				log.Panic("Message cannot be retrieved: " + err.Error())
+			}
 			state[i][j] = 2
 			image := gtk.NewImageFromFile(cross.Name())
 			button[i][j].SetImage(image)
 			isMyTurn = true
-			judge()
-			//	if err != nil {
-			//		log.Fatal(err)
-			//	}
+			if finished := judge(); finished == false {
+				label.SetLabel("Your turn")
+			}
 		}
 	}
 }
 
 func broadcast() {
-	serverAddr, err := net.ResolveUDPAddr("udp", "255.255.255.255:6392")
+	serverAddr, err := net.ResolveUDPAddr("udp", "255.255.255.255:"+strconv.Itoa(PORT))
 	conn, err := net.DialUDP("udp", nil, serverAddr)
 	if err != nil {
 		log.Panic("Broadcast cannot be sent")
 	}
+	localAddr = conn.LocalAddr()
 	log.Println("Broadcasting...")
 	for {
 		fmt.Fprintf(conn, "broadcast ")
@@ -240,5 +275,6 @@ func readResource(file string) *os.File {
 			log.Panicln("Resource file " + file + " are not found.")
 		}
 	}
+	log.Println("Reading resource: " + file)
 	return result
 }

@@ -18,17 +18,19 @@ const (
 	WIDTH  int = 3
 )
 
-var window *gtk.Window
-var label *gtk.Label
-var button [][]*gtk.Button
-var state [][]int
-var address map[string]int
-var addressList *gtk.ComboBoxText
-var blank, nought, cross *os.File
-var startButton *gtk.Button
-var opponent string
-var isMyTurn bool
-var localAddr net.Addr
+var (
+	window               *gtk.Window
+	label                *gtk.Label
+	button               [][]*gtk.Button
+	state                [][]int
+	address              map[string]int
+	addressList          *gtk.ComboBoxText
+	blank, nought, cross *os.File
+	startButton          *gtk.Button
+	opponent             string
+	isMyTurn             bool
+	localAddr            net.Addr
+)
 
 func main() {
 	opponent = ""
@@ -42,6 +44,7 @@ func main() {
 	window.SetTitle("GTK Noughts & Crosses")
 	window.Connect("destroy", gtk.MainQuit)
 
+	// Message label
 	label = gtk.NewLabel("Select an opponent")
 	label.ModifyFontEasy("DejaVu Serif 20")
 
@@ -60,7 +63,6 @@ func main() {
 			image := gtk.NewImageFromFile(blank.Name())
 			button[i][j].SetImage(image)
 			table.Attach(button[i][j], uint(i), uint(i+1), uint(j), uint(j+1), gtk.FILL, gtk.FILL, 0, 0)
-
 			state[i][j] = 0
 			copiedI := i
 			copiedJ := j
@@ -82,7 +84,7 @@ func main() {
 	}
 	addressList = gtk.NewComboBoxText()
 
-	//startButton
+	// Start button
 	startButton = gtk.NewButtonWithLabel("Start")
 	startButton.Connect("clicked", func() {
 		if addressList.GetActiveText() != "" {
@@ -99,6 +101,8 @@ func main() {
 		}
 
 	})
+
+	// Run goroutines for listening messages and broadcasting my IP
 	go listen(addressList)
 	go broadcast()
 
@@ -131,7 +135,7 @@ func sendMessage(remoteAddr, message string) {
 func judge() bool {
 	msg := []string{"Draw!", "You've won!", "You've lost!"}
 	msgNum := -1
-	// Check whether each wins
+	// Check whether either wins
 	for n := 1; n <= 2; n++ {
 		if (state[0][0] == n && state[1][0] == n && state[2][0] == n) ||
 			(state[0][1] == n && state[1][1] == n && state[2][1] == n) ||
